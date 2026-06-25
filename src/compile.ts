@@ -178,7 +178,7 @@ function compileMatchMap(map: MatchMap): MingoQuery {
     for (const frag of compileLeafClauses(map[path])) clauses.push({ [path]: frag });
   }
   if (clauses.length === 0) return {};
-  if (clauses.length === 1) return clauses[0];
+  if (clauses.length === 1) return clauses[0]!; // length===1 guarantees [0] (noUncheckedIndexedAccess-safe)
   return { $and: clauses };
 }
 
