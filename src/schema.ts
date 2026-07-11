@@ -34,14 +34,22 @@ export const operatorTestSchema = z
   .strict();
 
 /**
- * A declarative condition. Combinators (`all`/`any`/`not`) are recognised only
- * as the sole key (`.strict()`); otherwise it's a match-map of path → test/value.
- * Recursive via `z.lazy`. Typed loosely to avoid TS recursion blow-up.
+ * A declarative condition. Combinators (`all`/`any`/`some`/`not`) are recognised
+ * only as the sole key (`.strict()`); otherwise it's a match-map of path →
+ * test/value. Recursive via `z.lazy`. Typed loosely to avoid TS recursion blow-up.
+ *
+ * `some: { require: k, of: [...] }` is the k-of-n threshold combinator: satisfied
+ * when at least `k` of the `of` sub-conditions hold. `any` ≡ `some{require:1}`,
+ * `all` ≡ `some{require:n}` — `some` is the general form the two are presets of.
+ * (composable-event-awaits P-001: the awaits-spec grammar IS this schema, no fork.)
  */
 export const dataConditionSchema: z.ZodType = z.lazy(() =>
   z.union([
     z.object({ all: z.array(dataConditionSchema) }).strict(),
     z.object({ any: z.array(dataConditionSchema) }).strict(),
+    z
+      .object({ some: z.object({ require: z.number().int().min(1), of: z.array(dataConditionSchema) }).strict() })
+      .strict(),
     z.object({ not: dataConditionSchema }).strict(),
     z.record(z.string(), z.unknown()),
   ]),

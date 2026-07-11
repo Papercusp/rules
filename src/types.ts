@@ -25,12 +25,16 @@ export type MatchMap = Record<string, OperatorTest | unknown>;
 
 /**
  * A declarative, serializable condition. Either a single combinator
- * (`all`/`any`/`not` — recognised only when it is the SOLE key) or a `MatchMap`
- * of path→test (implicit AND). Combinators nest arbitrarily.
+ * (`all`/`any`/`some`/`not` — recognised only when it is the SOLE key) or a
+ * `MatchMap` of path→test (implicit AND). Combinators nest arbitrarily.
+ *
+ * `some: { require, of }` is the k-of-n threshold form: satisfied when at least
+ * `require` of the `of` sub-conditions hold (`any` ≡ require:1, `all` ≡ require:n).
  */
 export type DataCondition =
   | { all: DataCondition[] }
   | { any: DataCondition[] }
+  | { some: { require: number; of: DataCondition[] } }
   | { not: DataCondition }
   | MatchMap;
 
