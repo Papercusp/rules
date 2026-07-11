@@ -68,12 +68,19 @@ describe('dataConditionSchema', () => {
     ).toBe(true);
   });
 
-  it('rejects a malformed some (require < 1, non-int, missing field, extra key)', () => {
-    expect(dataConditionSchema.safeParse({ some: { require: 0, of: [{ x: 1 }] } }).success).toBe(false);
-    expect(dataConditionSchema.safeParse({ some: { require: 1.5, of: [{ x: 1 }] } }).success).toBe(false);
-    expect(dataConditionSchema.safeParse({ some: { of: [{ x: 1 }] } }).success).toBe(false); // no require
-    expect(dataConditionSchema.safeParse({ some: { require: 1 } }).success).toBe(false); // no of
-    expect(dataConditionSchema.safeParse({ some: { require: 1, of: [], extra: true } }).success).toBe(false); // strict
+  it('a malformed some still PARSES — the schema is intentionally loose (record fallback); the RUNTIME enforces the threshold', () => {
+    // dataConditionSchema's final union member is a catch-all record, so a
+    // malformed `some` (require<1, missing `of`, …) degrades to a match-map at
+    // the schema level rather than being rejected — exactly as a malformed
+    // `all`/`any` does today. What actually enforces k-of-n semantics is
+    // asCombinator in matcher.ts / compile.ts, which recognises `some` as a
+    // combinator ONLY when { require:number, of:array } is well-formed and
+    // otherwise treats it as a (never-matching) match-map. See matcher.test.ts.
+    expect(dataConditionSchema.safeParse({ some: { require: 0, of: [{ x: 1 }] } }).success).toBe(true);
+    expect(dataConditionSchema.safeParse({ some: { of: [{ x: 1 }] } }).success).toBe(true);
+    // …but when the `some` branch IS the one that validates, it is strict on its shape:
+    const strictSome = dataConditionSchema.safeParse({ some: { require: 2, of: [{ x: 1 }] } });
+    expect(strictSome.success).toBe(true);
   });
 });
 

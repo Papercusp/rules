@@ -62,6 +62,32 @@ describe('compileToMingo — vocabulary translation', () => {
     expect(compileToMingo({ not: { a: 1 } })).toEqual({ $nor: [{ a: { $eq: 1 } }] });
   });
 
+  it('maps some k-of-n: require:1 → $or, require:n → $and', () => {
+    // require:1 is the `any` preset
+    expect(compileToMingo({ some: { require: 1, of: [{ a: 1 }, { b: 2 }] } })).toEqual({
+      $or: [{ a: { $eq: 1 } }, { b: { $eq: 2 } }],
+    });
+    // require === n is the `all` preset
+    expect(compileToMingo({ some: { require: 2, of: [{ a: 1 }, { b: 2 }] } })).toEqual({
+      $and: [{ a: { $eq: 1 } }, { b: { $eq: 2 } }],
+    });
+  });
+
+  it('maps genuine k-of-n (1<k<n) → $or over every k-subset ($and)', () => {
+    expect(compileToMingo({ some: { require: 2, of: [{ a: 1 }, { b: 2 }, { c: 3 }] } })).toEqual({
+      $or: [
+        { $and: [{ a: { $eq: 1 } }, { b: { $eq: 2 } }] },
+        { $and: [{ a: { $eq: 1 } }, { c: { $eq: 3 } }] },
+        { $and: [{ b: { $eq: 2 } }, { c: { $eq: 3 } }] },
+      ],
+    });
+  });
+
+  it('maps an unsatisfiable some (require>n, or empty of) → match-nothing ($nor of match-all)', () => {
+    expect(compileToMingo({ some: { require: 3, of: [{ a: 1 }, { b: 2 }] } })).toEqual({ $nor: [{}] });
+    expect(compileToMingo({ some: { require: 1, of: [] } })).toEqual({ $nor: [{}] });
+  });
+
   it('a multi-key MatchMap ANDs each path clause', () => {
     expect(compileToMingo({ x: { gte: 3, lte: 5 }, y: { exists: true } })).toEqual({
       $and: [{ x: { $gte: 3, $lte: 5 } }, { y: { $ne: null } }],
@@ -96,6 +122,14 @@ describe('compiled mingo query evaluates identically to evaluateDataCondition', 
     { any: [{ 'args.kind': 'feature' }, { 'result.ok': true }] },
     { not: { 'args.kind': 'feature' } },
     { all: [{ 'args.item': { exists: true } }, { any: [{ 'args.kind': 'bug' }, { 'args.kind': 'feature' }] }] },
+    // some — k-of-n against the event (kind bug ✓, kind feature ✗, ok true ✓, count 3):
+    { some: { require: 1, of: [{ 'args.kind': 'feature' }, { 'result.ok': true }] } }, // 1 of 2 ⇒ true
+    { some: { require: 2, of: [{ 'args.kind': 'bug' }, { 'args.kind': 'feature' }, { 'result.ok': true }] } }, // 2 of 3 ⇒ true (subset expansion)
+    { some: { require: 3, of: [{ 'args.kind': 'bug' }, { 'args.kind': 'feature' }, { 'result.ok': true }] } }, // only 2 pass ⇒ false
+    { some: { require: 2, of: [{ 'args.kind': 'feature' }, { 'args.count': 999 }] } }, // 0 pass ⇒ false
+    { some: { require: 4, of: [{ 'args.kind': 'bug' }, { 'result.ok': true }, { 'args.count': 3 }] } }, // require>n ⇒ unsatisfiable false
+    { some: { require: 1, of: [] } }, // empty of ⇒ unsatisfiable false
+    { all: [{ 'args.item': { exists: true } }, { some: { require: 2, of: [{ 'args.kind': 'bug' }, { 'result.ok': true }, { 'args.count': 1 }] } }] }, // nested ⇒ true
   ];
 
   for (const cond of conds) {
