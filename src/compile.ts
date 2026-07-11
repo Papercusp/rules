@@ -151,6 +151,7 @@ export function compileLeafClauses(test: unknown): MingoFragment[] {
 type Combinator =
   | { kind: 'all'; subs: DataCondition[] }
   | { kind: 'any'; subs: DataCondition[] }
+  | { kind: 'some'; require: number; subs: DataCondition[] }
   | { kind: 'not'; sub: DataCondition };
 
 /** Sole-key combinator detection — mirrors matcher.ts so the two agree. */
@@ -164,12 +165,41 @@ function soleCombinator(cond: DataCondition): Combinator | null {
     if (!Array.isArray(subs)) return null;
     return { kind: key, subs: subs as DataCondition[] };
   }
+  if (key === 'some') {
+    const spec = (cond as Record<string, unknown>).some;
+    if (spec !== null && typeof spec === 'object' && !Array.isArray(spec)) {
+      const s = spec as Record<string, unknown>;
+      if (typeof s.require === 'number' && Array.isArray(s.of)) {
+        return { kind: 'some', require: s.require, subs: s.of as DataCondition[] };
+      }
+    }
+    return null;
+  }
   if (key === 'not') {
     const sub = (cond as Record<string, unknown>).not;
     if (sub !== null && typeof sub === 'object' && !Array.isArray(sub)) return { kind: 'not', sub: sub as DataCondition };
   }
   return null;
 }
+
+/**
+ * Every size-`k` subset of `xs` (order-preserving) — the exact expansion basis
+ * for `some{require:k}` → `$or` of (`$and` of a k-subset). Bounded by the caller
+ * to `1 < k < n` (the presets short-circuit), so this only fires for genuine
+ * k-of-n. C(n,k) can grow large; the rules-layer `some` is expected small and
+ * this is the SECONDARY compile artifact (matcher.ts is the runtime evaluator),
+ * so an exact-but-expanded query is the right trade here. Large event trees live
+ * in the await store's counters (composable-event-awaits P-003), not this query.
+ */
+function kCombinations<T>(xs: T[], k: number): T[][] {
+  if (k <= 0) return [[]];
+  if (k > xs.length) return [];
+  const [head, ...rest] = xs;
+  return [...kCombinations(rest, k - 1).map((c) => [head!, ...c]), ...kCombinations(rest, k)];
+}
+
+/** A mingo query that matches NO document: NOR of the match-everything (`{}`) query. */
+const UNSATISFIABLE: MingoQuery = { $nor: [{}] };
 
 /** Compile a MatchMap (path → leaf test, implicit AND) into a mingo query. */
 function compileMatchMap(map: MatchMap): MingoQuery {
@@ -193,6 +223,18 @@ export function compileToMingo(when: DataCondition): MingoQuery {
   if (combinator) {
     if (combinator.kind === 'all') return { $and: combinator.subs.map(compileToMingo) };
     if (combinator.kind === 'any') return { $or: combinator.subs.map(compileToMingo) };
+    if (combinator.kind === 'some') {
+      // k-of-n. `any` (k=1) → $or; `all` (k=n) → $and; unreachable/empty (n=0 or
+      // k>n) → match-nothing; the genuine middle 1<k<n → $or over every k-subset
+      // (each an $and). Exactly what evaluateDataCondition's count>=require decides.
+      const subs = combinator.subs.map(compileToMingo);
+      const n = subs.length;
+      const need = combinator.require;
+      if (n === 0 || need > n) return UNSATISFIABLE;
+      if (need <= 1) return { $or: subs };
+      if (need === n) return { $and: subs };
+      return { $or: kCombinations(subs, need).map((group) => ({ $and: group })) };
+    }
     return { $nor: [compileToMingo(combinator.sub)] };
   }
   return compileMatchMap(when as MatchMap);

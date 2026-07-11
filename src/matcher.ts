@@ -26,9 +26,10 @@ import type { Condition, DataCondition, MatchMap } from './types';
 type Combinator =
   | { kind: 'all'; subs: DataCondition[] }
   | { kind: 'any'; subs: DataCondition[] }
+  | { kind: 'some'; require: number; subs: DataCondition[] }
   | { kind: 'not'; sub: DataCondition };
 
-/** Combinator detection: a SOLE key of `all`/`any`/`not` with the right value type. */
+/** Combinator detection: a SOLE key of `all`/`any`/`some`/`not` with the right value type. */
 function asCombinator(cond: DataCondition): Combinator | null {
   if (!isPlainObject(cond)) return null;
   const keys = Object.keys(cond);
@@ -37,6 +38,18 @@ function asCombinator(cond: DataCondition): Combinator | null {
   if (key === 'all' || key === 'any') {
     const subs = (cond as Record<string, unknown>)[key];
     if (Array.isArray(subs)) return { kind: key, subs: subs as DataCondition[] };
+    return null;
+  }
+  if (key === 'some') {
+    // { some: { require: k, of: [...] } } — k-of-n threshold. Both fields required
+    // and well-typed, else it is NOT a combinator (falls through to match-map).
+    const spec = (cond as Record<string, unknown>).some;
+    if (isPlainObject(spec)) {
+      const s = spec as Record<string, unknown>;
+      if (typeof s.require === 'number' && Array.isArray(s.of)) {
+        return { kind: 'some', require: s.require, subs: s.of as DataCondition[] };
+      }
+    }
     return null;
   }
   if (key === 'not') {
@@ -53,6 +66,16 @@ export function evaluateDataCondition(cond: DataCondition, event: unknown): bool
   if (combinator) {
     if (combinator.kind === 'all') return combinator.subs.every((c) => evaluateDataCondition(c, event));
     if (combinator.kind === 'any') return combinator.subs.some((c) => evaluateDataCondition(c, event));
+    if (combinator.kind === 'some') {
+      // k-of-n: short-circuit as soon as `require` subs have passed. `require > n`
+      // (or an empty `of`) can never reach the threshold ⇒ false, matching compile.ts.
+      const need = combinator.require;
+      let count = 0;
+      for (const c of combinator.subs) {
+        if (evaluateDataCondition(c, event) && ++count >= need) return true;
+      }
+      return false;
+    }
     return !evaluateDataCondition(combinator.sub, event);
   }
   // A match-map: every path's leaf test must pass.
