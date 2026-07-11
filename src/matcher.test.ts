@@ -45,6 +45,42 @@ describe('evaluateDataCondition — combinators', () => {
   });
 });
 
+describe('evaluateDataCondition — some (k-of-n threshold)', () => {
+  // of: [true, false, true] against `event` — kind bug (T), kind feature (F), ok true (T) ⇒ 2 pass.
+  const of = [{ 'args.kind': 'bug' }, { 'args.kind': 'feature' }, { 'result.ok': true }];
+  it('require:1 ≡ any (fires on the first pass)', () => {
+    expect(evaluateDataCondition({ some: { require: 1, of } }, event)).toBe(true);
+    expect(evaluateDataCondition({ some: { require: 1, of: [{ 'args.kind': 'feature' }] } }, event)).toBe(false);
+  });
+  it('require:2 fires when exactly two of three pass', () => {
+    expect(evaluateDataCondition({ some: { require: 2, of } }, event)).toBe(true);
+  });
+  it('require:3 (≡ all) fails when only two of three pass', () => {
+    expect(evaluateDataCondition({ some: { require: 3, of } }, event)).toBe(false);
+    // all three true ⇒ require:3 passes (all-of preset)
+    const allTrue = [{ 'args.kind': 'bug' }, { 'result.ok': true }, { 'args.item': { exists: true } }];
+    expect(evaluateDataCondition({ some: { require: 3, of: allTrue } }, event)).toBe(true);
+  });
+  it('require greater than the number of sub-conditions can never fire', () => {
+    expect(evaluateDataCondition({ some: { require: 4, of } }, event)).toBe(false);
+  });
+  it('an empty of never fires', () => {
+    expect(evaluateDataCondition({ some: { require: 1, of: [] } }, event)).toBe(false);
+  });
+  it('nests inside and under other combinators', () => {
+    const cond = { all: [{ 'args.item': { exists: true } }, { some: { require: 2, of } }] };
+    expect(evaluateDataCondition(cond, event)).toBe(true);
+    const nested = { some: { require: 1, of: [{ all: [{ 'args.kind': 'feature' }] }, { any: [{ 'result.ok': true }] }] } };
+    expect(evaluateDataCondition(nested, event)).toBe(true);
+  });
+  it('a malformed some (missing require / of) is treated as a match-map, not a combinator', () => {
+    // sole key `some` but the value is not { require:number, of:array } ⇒ falls through to
+    // match-map semantics (path 'some' does not exist on the event ⇒ its leaf test fails).
+    expect(evaluateDataCondition({ some: { of } } as Record<string, unknown>, event)).toBe(false);
+    expect(evaluateDataCondition({ some: [{ 'result.ok': true }] } as Record<string, unknown>, event)).toBe(false);
+  });
+});
+
 describe('evaluateCondition', () => {
   it('undefined ⇒ always true', () => {
     expect(evaluateCondition(undefined, event)).toBe(true);

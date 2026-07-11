@@ -59,6 +59,22 @@ describe('dataConditionSchema', () => {
     expect(dataConditionSchema.safeParse({ not: { x: 1 } }).success).toBe(true);
     expect(dataConditionSchema.safeParse({ 'args.item': { exists: true } }).success).toBe(true);
   });
+
+  it('accepts a some k-of-n combinator, nested', () => {
+    expect(dataConditionSchema.safeParse({ some: { require: 2, of: [{ x: 1 }, { y: 2 }, { z: 3 }] } }).success).toBe(true);
+    // some nested inside all
+    expect(
+      dataConditionSchema.safeParse({ all: [{ a: 1 }, { some: { require: 1, of: [{ b: 2 }, { c: 3 }] } }] }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a malformed some (require < 1, non-int, missing field, extra key)', () => {
+    expect(dataConditionSchema.safeParse({ some: { require: 0, of: [{ x: 1 }] } }).success).toBe(false);
+    expect(dataConditionSchema.safeParse({ some: { require: 1.5, of: [{ x: 1 }] } }).success).toBe(false);
+    expect(dataConditionSchema.safeParse({ some: { of: [{ x: 1 }] } }).success).toBe(false); // no require
+    expect(dataConditionSchema.safeParse({ some: { require: 1 } }).success).toBe(false); // no of
+    expect(dataConditionSchema.safeParse({ some: { require: 1, of: [], extra: true } }).success).toBe(false); // strict
+  });
 });
 
 describe('serializableRuleSchema shape', () => {
