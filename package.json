@@ -17,6 +17,7 @@
     "zod": "^4.4.2"
   },
   "devDependencies": {
+    "@papercusp/test-config": "*",
     "vitest": "^4.1.4"
   }
 }
