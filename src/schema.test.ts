@@ -68,19 +68,29 @@ describe('dataConditionSchema', () => {
     ).toBe(true);
   });
 
-  it('a malformed some still PARSES — the schema is intentionally loose (record fallback); the RUNTIME enforces the threshold', () => {
-    // dataConditionSchema's final union member is a catch-all record, so a
-    // malformed `some` (require<1, missing `of`, …) degrades to a match-map at
-    // the schema level rather than being rejected — exactly as a malformed
-    // `all`/`any` does today. What actually enforces k-of-n semantics is
-    // asCombinator in matcher.ts / compile.ts, which recognises `some` as a
-    // combinator ONLY when { require:number, of:array } is well-formed and
-    // otherwise treats it as a (never-matching) match-map. See matcher.test.ts.
-    expect(dataConditionSchema.safeParse({ some: { require: 0, of: [{ x: 1 }] } }).success).toBe(true);
-    expect(dataConditionSchema.safeParse({ some: { of: [{ x: 1 }] } }).success).toBe(true);
-    // …but when the `some` branch IS the one that validates, it is strict on its shape:
-    const strictSome = dataConditionSchema.safeParse({ some: { require: 2, of: [{ x: 1 }] } });
-    expect(strictSome.success).toBe(true);
+  it.each([
+    { all: [{ x: 1 }, 'note'] },
+    { any: [false] },
+    { all: [{ any: [{ x: 1 }, null] }] },
+    { not: { all: [42] } },
+    { not: null },
+    { some: { require: 0, of: [{ x: 1 }] } },
+    { some: { of: [{ x: 1 }] } },
+    { some: { require: 1, of: ['note'] } },
+    { some: { require: 1, of: [{ x: 1 }], extra: true } },
+  ])('rejects malformed sole-key combinators rather than falling back to a match-map: %j', (condition) => {
+    expect(dataConditionSchema.safeParse(condition).success).toBe(false);
+    expect(safeParseSerializableRule({ id: 'r', on: 'event', fire: 'action', when: condition }).success).toBe(false);
+  });
+
+  it('preserves arbitrary match-map values and multi-key maps with combinator-named fields', () => {
+    expect(dataConditionSchema.safeParse({ x: ['note', false, null] }).success).toBe(true);
+    expect(dataConditionSchema.safeParse({ x: { equals: { all: ['literal data'] } } }).success).toBe(true);
+    expect(dataConditionSchema.safeParse({ all: ['literal data'], enabled: true }).success).toBe(true);
+    expect(dataConditionSchema.safeParse({ not: null, some: 'literal data' }).success).toBe(true);
+    expect(dataConditionSchema.safeParse({}).success).toBe(true);
+    // A well-formed but unsatisfiable threshold is still a valid condition.
+    expect(dataConditionSchema.safeParse({ some: { require: 2, of: [{ x: 1 }] } }).success).toBe(true);
   });
 });
 

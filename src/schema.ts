@@ -33,10 +33,26 @@ export const operatorTestSchema = z
   })
   .strict();
 
+const combinatorKeys = ['all', 'any', 'some', 'not'];
+
+// A sole combinator key must validate in its recursive branch; otherwise a
+// malformed child can escape through this arbitrary-value MatchMap fallback.
+// Multi-key maps still treat these names as ordinary paths, as the matcher does.
+const matchMapSchema = z
+  .record(z.string(), z.unknown())
+  .refine((map) => {
+    const keys = Object.keys(map);
+    return keys.length !== 1 || !combinatorKeys.includes(keys[0]);
+  }, 'A sole combinator key must contain a valid recursive condition')
+  // Refinements are not projected by Zod. Publish the equivalent constraint so
+  // MCP/JSON-schema callers cannot accept what the callable Zod schema rejects.
+  .meta({ not: { maxProperties: 1, anyOf: combinatorKeys.map((key) => ({ required: [key] })) } });
+
 /**
  * A declarative condition. Combinators (`all`/`any`/`some`/`not`) are recognised
- * only as the sole key (`.strict()`); otherwise it's a match-map of path →
- * test/value. Recursive via `z.lazy`. Typed loosely to avoid TS recursion blow-up.
+ * only as the sole key (`.strict()`); malformed sole-key combinators are rejected,
+ * otherwise it's a match-map of path → test/value. Recursive via `z.lazy`.
+ * Typed loosely to avoid TS recursion blow-up.
  *
  * `some: { require: k, of: [...] }` is the k-of-n threshold combinator: satisfied
  * when at least `k` of the `of` sub-conditions hold. `any` ≡ `some{require:1}`,
@@ -51,7 +67,7 @@ export const dataConditionSchema: z.ZodType = z.lazy(() =>
       .object({ some: z.object({ require: z.number().int().min(1), of: z.array(dataConditionSchema) }).strict() })
       .strict(),
     z.object({ not: dataConditionSchema }).strict(),
-    z.record(z.string(), z.unknown()),
+    matchMapSchema,
   ]),
 );
 
